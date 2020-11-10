@@ -1,7 +1,6 @@
 #include "packet_handler.h"
 #include "packet_header.h"
 #include "serial_linux.h"
-#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,8 +27,8 @@ static struct UART* uart;
 #pragma pack(push,1)
 typedef struct LedPacket {
 	PacketHeader header;
-	uint8_t stanza;	//uint8_t o uint16_t
-	uint8_t on_off;	//uint8_t o uint16_t
+	uint8_t stanza;	
+	uint8_t on_off;	
 } LedPacket;
 #pragma pack(pop) 
 
@@ -59,7 +58,8 @@ PacketOperations ledPacket_ops = {
 #pragma pack(push,1)
 typedef struct TempPacket {
 	PacketHeader header;
-	uint8_t temp_val;	
+	float temp_val;
+	uint8_t chi;	
 } TempPacket;
 #pragma pack(pop) 
 
@@ -75,11 +75,11 @@ PacketHeader* TempPacket_initializeBuffer(PacketType type, PacketSize size, void
 }
 
 PacketStatus TempPacket_onReceive(PacketHeader* header, void* args __attribute__((unused))){
-	++header->seq;
-	TempPacket* t = (TempPacket*) header;
-	memcpy(&t, header, header->size);
-	int x = 1;
-	return Success;
+	
+	TempPacket* te= (TempPacket*) header;
+	if(te->chi==1){
+		printf("La temperatura è di: %.1f°C\n", te->temp_val);
+	}
 }
 
 PacketOperations tempPacket_ops = {
@@ -98,7 +98,7 @@ PacketOperations tempPacket_ops = {
 typedef struct DigitalStatusPacket {
 	PacketHeader header;
 	uint8_t pin;
-	uint8_t status;	//uint8_t o uint16_t
+	uint8_t status;	
 } DigitalStatusPacket;
 #pragma pack(pop) 
 
@@ -114,7 +114,6 @@ PacketHeader* DigitalStatusPacket_initializeBuffer(PacketType type, PacketSize s
 }
 
 PacketStatus DigitalStatusPacket_onReceive(PacketHeader* header, void* args __attribute__((unused))){
-	++header->seq;
 	DigitalStatusPacket* d = (DigitalStatusPacket*) header;
 	char camera[20];
 	if (d->pin == 13 ) { 
@@ -181,19 +180,21 @@ void flushInputBuffer( int fd) {
 
 void configura (void) {
 	printf("Inizio configurazione:\n");
-	printf("Inserisci il nome della prima stanza?\n");
+	printf("Inserisci il nome della prima stanza\n");
 	scanf("%s", nomeStanza1);
-	printf("Inserisci il nome della seconda stanza?\n");
+	printf("Inserisci il nome della seconda stanza\n");
 	scanf("%s", nomeStanza2);
-	printf("Inserisci il nome della terza stanza?\n");
+	printf("Inserisci il nome della terza stanza\n");
 	scanf("%s", nomeStanza3);
-	printf("Inserisci il nome della quarta stanza?\n");
+	printf("Inserisci il nome della quarta stanza\n");
 	scanf("%s", nomeStanza4);
 	printf("Le tue stanze sono >> 1°:%s, 2°:%s, 3°:%s, 4°:%s\n", nomeStanza1, nomeStanza2, nomeStanza3, nomeStanza4);
 }
 
 int main(int argc, char** argv){
-	assert(argc>1);
+	if (argc!=2){
+		return -1;
+	}
 	int fd = serial_open(argv[1]);
 	if(fd<0)
 		return 0;
@@ -205,7 +206,6 @@ int main(int argc, char** argv){
 
 	PacketHandler_initialize(&packet_handler);
 	PacketHandler_installPacket(&packet_handler, &ledPacket_ops);
-
 	PacketHandler_installPacket(&packet_handler, &tempPacket_ops);
 	PacketHandler_installPacket(&packet_handler, &DigitalStatusPacket_ops);
 	
@@ -215,24 +215,12 @@ int main(int argc, char** argv){
 			printf("Cosa vuoi controllare? [luce, gradi, digital], [esc] per uscire\n");
 			scanf("%s", &cmd);
 			if (!strcmp(cmd, "gradi")){
-				char x;
-				tcflush(fd, TCIFLUSH);
+				TempPacket t={ {TEMP_PACKET_TYPE, TEMP_PACKET_SIZE, 0}, 0, 0};
+				PacketHandler_sendPacket(&packet_handler, (PacketHeader*) &t);
+				
+				flushOutputBuffer(fd);
 				usleep(50000);
-				int ok =1;
-				while ( ok){	
-					read(fd,&x,1);	
-					if (x == 'I'){
-						ok=0;
-						for(int i=0; i<5; i++){
-							read(fd,&x,1);	
-							if (x != "%-19s"){
-								temperatura[i] = x;
-							}
-						}
-					}
-				}
-				printf("La temperatura è di: %s°C\n", temperatura);
-				printf("\n");
+				flushInputBuffer(fd);
 			}
 			else if (!strcmp(cmd, "luce")){
 				printf("Quale stanza vuoi controllare? [%s, %s, %s, %s]\n",nomeStanza1, nomeStanza2, nomeStanza3, nomeStanza4);
@@ -240,13 +228,13 @@ int main(int argc, char** argv){
 				uint8_t stanza=0;
 				int continua = 1;
 				if (!strcmp(cmd, nomeStanza1)){
-					stanza = 13;	//int pin_13 =  cucina;
+					stanza = 13;	
 				} else if (!strcmp(cmd, nomeStanza2)){
-					stanza = 10;	//int pin_10 =  bagno;
+					stanza = 10;	
 				} else if (!strcmp(cmd, nomeStanza3)){
-					stanza = 9;	//int pin_9 =  salone;
+					stanza = 9;	
 				} else if (!strcmp(cmd, nomeStanza4)){
-					stanza = 6; //int pin_6 =  altro;
+					stanza = 6; 
 				}
 				else {
 					printf("Stanza non trovata!\n");
@@ -256,38 +244,41 @@ int main(int argc, char** argv){
 					printf("Vuoi accendere o spegnere la luce in %s? [accendi/spegni]\n", cmd);
 					scanf("%s", &cmd1);
 					uint8_t on_off;
+					int ok=0;
 					if (!strcmp(cmd1, "spegni")){
 						printf("Mi hai detto: %s luce in %s\n", cmd1, cmd);
 						on_off = ledOff;
+						ok=1;
 					}
 					else if(!strcmp(cmd1, "accendi")) {
 						printf("Mi hai detto: %s luce in %s\n", cmd1, cmd);
 						on_off = ledOn;
+						ok=1;
 					}
 					else {
-						on_off=0;
+						printf("comando inserito sbagliato!!\n");
 					}
+					if(ok==1){
 					LedPacket p0 = { {LED_PACKET_TYPE, LED_PACKET_SIZE, 0}, stanza, on_off};
-					printf("p0.stanza = %d\n", stanza);
-					printf("p0.on_off = %d\n", on_off);
 					PacketHandler_sendPacket(&packet_handler, (PacketHeader*) &p0);
 					flushOutputBuffer(fd);
+					}
 				}	
 			}	
 			else if (!strcmp(cmd, "digital")){
 				printf("Di quale stanza vuoi sapere lo stato? [%s,%s,%s,%s]\n", nomeStanza1, nomeStanza2, nomeStanza3, nomeStanza4);
 				scanf("%s", &cmd);
 				uint8_t pinDigitale; 
-				if (!strcmp(cmd, "cucina")){
-					pinDigitale = 13;	//int pin_13 =  cucina;
-				} else if (!strcmp(cmd, "bagno")){
-					pinDigitale = 10;	//int pin_10 =  bagno;
-				} else if (!strcmp(cmd, "salone")){
-					pinDigitale = 9;	//int pin_9 =  salone;
-				} else if (!strcmp(cmd, "21")){
-					pinDigitale = 21;	//int pin_9 =  salone;
+				if (!strcmp(cmd, nomeStanza1)){
+					pinDigitale = 13;	
+				} else if (!strcmp(cmd, nomeStanza2)){
+					pinDigitale = 10;
+				} else if (!strcmp(cmd, nomeStanza3)){
+					pinDigitale = 9;
+				} else if (!strcmp(cmd, nomeStanza4)){
+					pinDigitale = 6;	
 				} else {
-					pinDigitale = 6; //int pin_6 =  altro;
+					return;
 				}
 				uint8_t statusPin = 0;
 				DigitalStatusPacket d0 = { {DIGITALSTATUS_PACKET_TYPE, DIGITALSTATUS_PACKET_SIZE, 0}, pinDigitale, statusPin};
@@ -303,6 +294,7 @@ int main(int argc, char** argv){
 			else {
 				printf("Comando non trovato, dimmi cosa vuoi fare...\n");	
 			}
-	}				
-		return 0;
+	}		
+	close(fd);	
+	return 0;
 }

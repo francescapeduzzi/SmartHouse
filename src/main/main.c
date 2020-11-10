@@ -8,7 +8,6 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include "delay.h"
-#include "pwm.h"
 #include "adc.h"
 #include <math.h>
 
@@ -19,15 +18,16 @@ float temperatura;
 uint8_t pinDigitale;
 uint8_t statusPin;
 int controllo= 0;
-volatile uint8_t interrupt_occurred=0;
+int controltemp=0;
+volatile uint8_t interrupt_occurred;
 volatile int reset=1;
 int button = 21;
 int piezo = 4;
-int valo=0;
 
 ISR(INT0_vect){
 		interrupt_occurred=1;
 }
+
 
 void flushInputBuffer(void){
 	while(UART_rxBufferFull(uart)){
@@ -44,13 +44,11 @@ int flushOutputBuffers(void)
 }
 
 void ledOn(uint8_t pin){
-  PWM_enable(pin, 0);
   DigIO_setDirection(pin, Output);
   DigIO_setValue(pin, 1);
 }
 
 void ledOff(uint8_t pin){
-  PWM_enable(pin, 0);
   DigIO_setDirection(pin, Output);
   DigIO_setValue(pin, 0);
 }
@@ -58,8 +56,8 @@ void ledOff(uint8_t pin){
 #pragma pack(push,1)
 typedef struct LedPacket {
 	PacketHeader header;
-	uint8_t stanza;	//uint8_t o uint16_t
-	uint8_t on_off;	//uint8_t o uint16_t
+	uint8_t stanza;	
+	uint8_t on_off;	
 } LedPacket;
 #pragma pack(pop) 
 
@@ -71,26 +69,26 @@ typedef struct LedPacket {
 #pragma pack(push,1)
 typedef struct TempPacket {
 	PacketHeader header;
-	uint8_t temp_val;	
+	float temp_val;
+	uint8_t chi;	
 } TempPacket;
 #pragma pack(pop) 
 
 #define TEMP_PACKET_TYPE 1
 #define TEMP_PACKET_SIZE (sizeof(TempPacket)) 
 
-//valore pin digitale
+
 #pragma pack(push,1)
 typedef struct DigitalStatusPacket {
 	PacketHeader header;
 	uint8_t pin;
-	uint8_t status;	//uint8_t o uint16_t
+	uint8_t status;	
 } DigitalStatusPacket;
 #pragma pack(pop) 
 
 #define DIGITALSTATUS_PACKET_TYPE 2
 #define DIGITALSTATUS_PACKET_SIZE (sizeof(DigitalStatusPacket))
 
-//TempPacket t;
 DigitalStatusPacket digital_buffer;
 LedPacket led_packet_buffer;
 //temperatura 
@@ -107,6 +105,8 @@ PacketHeader* TempPacket_initializeBuffer(PacketType type, PacketSize size, void
 	return (PacketHeader*) &temp_packet_buffer;
 }
 
+
+
 PacketHeader* DigitalStatusPacket_initializeBuffer(PacketType type, PacketSize size, void* args __attribute__((unused))) {
 	if(type != DIGITALSTATUS_PACKET_TYPE || size != DIGITALSTATUS_PACKET_SIZE)
 		return 0;
@@ -120,12 +120,17 @@ void val (int pinD){
 
 PacketStatus DigitalStatusPacket_onReceive(PacketHeader* header, void* args __attribute__((unused))){
 	controllo = 1;
-	++header->seq;
 	DigitalStatusPacket* d = (DigitalStatusPacket*) header;	
 	val(d->pin);
 	return Success;
 
 }
+
+PacketStatus TempPacket_onReceive(PacketHeader* header, void* args __attribute__((unused))){
+	TempPacket* te= (TempPacket*) header;
+	controltemp=1;
+	}
+
 
 PacketStatus LedPacket_onReceive(PacketHeader* header, void* args __attribute__((unused))){
 	LedPacket* l = (LedPacket*) header;
@@ -177,15 +182,12 @@ PacketOperations DigitalStatusPacket_ops = {
 	0
 }; 
 
-
 void temp(void) {
 	uint8_t valoretemp= adc_read();
+	
 	float voltage= (valoretemp/1024.0f)*5.0f;
-  float temperature=(voltage-0.5f)*100.0f;
-  temperatura= (round(temperature * 10) / 10.0f);
-}
-//temperatura 
-PacketStatus TempPacket_onReceive(PacketHeader* header, void* args __attribute__((unused))){
+        float temperature=(voltage-0.5f)*100.0f;
+	temperatura= (round(temperature * 10) / 10.0f);
 }
 
 
@@ -199,18 +201,12 @@ PacketOperations tempPacket_ops = {
 };
 
 int main(void){
-	/*DigIO_init();
-	DigIO_setDirection(button, Input); //PD21 input
+	DigIO_init();
+	DigIO_setDirection(button, Input); //Pin 21 input
 	DigIO_setValue(button, 1);
-	PWM_init();*/
-
+	
 	adc_init();
 	uart= UART_init(0, 115200);
-
-	
-
-	DDRD=0x0; // all pins on port b set as input
-  PORTD=0x1; // pull_up on port b
 
   // enable interrupt 0
   EIMSK |=1<<INT0;
@@ -227,24 +223,20 @@ int main(void){
 	PacketHandler_installPacket(&packet_handler, &tempPacket_ops);
 	PacketHandler_installPacket(&packet_handler, &DigitalStatusPacket_ops);
 	
+	interrupt_occurred=0;
 	while(1){
 		while (! interrupt_occurred){
 			DigIO_setValue(button, 1);		
 			flushInputBuffer();	
 			delayMs(10);
 		
-			temp();
-		
-			char tempc[5];
-			dtostrf(temperatura, 2, 1, tempc );
-			UDR0 ='I';
-  		for(int i=0; i<5; i++) {
-  			while ( !(UCSR0A & (1<<UDRE0)) );
-    		UDR0 = tempc[i];
-    		delayMs(50);}
-			UDR0 ='F';
-    	UDR0='\n';
-			
+			if(controltemp){
+				temp();
+				TempPacket t={ {TEMP_PACKET_TYPE, TEMP_PACKET_SIZE, 0}, temperatura, 1};
+				PacketHandler_sendPacket(&packet_handler, (PacketHeader*) &t);
+				flushOutputBuffers();
+				controltemp=0;		
+			}
 			if (controllo){
 				DigitalStatusPacket d0 = { {DIGITALSTATUS_PACKET_TYPE, DIGITALSTATUS_PACKET_SIZE, 0}, pinDigitale, statusPin};
 				PacketHandler_sendPacket(&packet_handler, (PacketHeader*) &d0);
@@ -252,6 +244,7 @@ int main(void){
 				controllo = 0 ;
 			}		
 		}	
+		
 		interrupt_occurred=0;
     ledOn(10);
 		ledOn(13);
@@ -269,6 +262,7 @@ int main(void){
 		DigIO_setValue(piezo, 1);
 		delayMs(100);
 		DigIO_setValue(piezo, 0);
+		
 	}
 	
 	PacketHandler_uninstallPacket(&packet_handler, LED_PACKET_TYPE);

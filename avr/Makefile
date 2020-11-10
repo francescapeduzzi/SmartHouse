@@ -25,9 +25,8 @@ OBJS=	pins.o\
     	eeprom.o\
      	delay.o\
      	digio.o\
-	pwm.o\
-	packet_handler.o\
-	adc.o\
+			packet_handler.o\
+			adc.o\
     
 HEADERS= packet_handler.h\
 	 packet_header.h\
@@ -37,7 +36,6 @@ HEADERS= packet_handler.h\
 	 eeprom.h\
 	 pins.h\
 	 uart.h\
-	 pwm.h\
 	 adc.h\
 	 
 BINS= main.elf\

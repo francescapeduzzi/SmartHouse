@@ -16,12 +16,15 @@ int ledOff = 0;
 int ledOn  = 1;
 char temperatura[5];
 int interrupt_occured = 0;
-char nomeStanza1[20]; 
-char nomeStanza2[20]; 
-char nomeStanza3[20]; 
-char nomeStanza4[20]; 
+char nomeStanza1[8]; 
+char nomeStanza2[8]; 
+char nomeStanza3[8]; 
+char nomeStanza4[8]; 
+char tmpStanza1[8]; 
+char tmpStanza2[8]; 
+char tmpStanza3[8]; 
+char tmpStanza4[8]; 
 
-//static struct UART* uart;
 /*------------------- LedPacket ------------*/
 
 #pragma pack(push,1)
@@ -80,6 +83,7 @@ PacketStatus TempPacket_onReceive(PacketHeader* header, void* args __attribute__
 	if(te->chi==1){
 		printf("La temperatura è di: %.1f°C\n", te->temp_val);
 	}
+	return Success;
 }
 
 PacketOperations tempPacket_ops = {
@@ -102,7 +106,7 @@ typedef struct DigitalStatusPacket {
 } DigitalStatusPacket;
 #pragma pack(pop) 
 
-#define DIGITALSTATUS_PACKET_TYPE 2
+#define DIGITALSTATUS_PACKET_TYPE 3
 #define DIGITALSTATUS_PACKET_SIZE (sizeof(DigitalStatusPacket))
 
 DigitalStatusPacket digital_buffer;
@@ -145,20 +149,89 @@ PacketOperations DigitalStatusPacket_ops = {
 	0,
 	DigitalStatusPacket_onReceive,
 	0
-}; 
+};
+
 //fine pacchetto DigitalStatus
+ 
+
+
+#pragma pack(push,1)
+typedef struct EepromPacket {
+	PacketHeader header;
+	uint8_t mitt;
+	uint8_t stanza1[8];
+	uint8_t stanza2[8];
+	uint8_t stanza3[8];
+	uint8_t stanza4[8];
+} EepromPacket;
+#pragma pack(pop) 
+
+#define EEPROM_PACKET_TYPE 2
+#define EEPROM_PACKET_SIZE (sizeof(EepromPacket))
+
+
+EepromPacket eeprom_packet_buffer;
+
+PacketHeader* EepromPacket_initializeBuffer(PacketType type, PacketSize size, void* args __attribute__((unused))) {
+	if(type != EEPROM_PACKET_TYPE || size != EEPROM_PACKET_SIZE)
+		return 0;
+	return (PacketHeader*) &eeprom_packet_buffer;
+}
+
+PacketStatus EepromPacket_onReceive(PacketHeader* header, void* args __attribute__((unused))){
+	EepromPacket* e= (EepromPacket*) header;
+	if (e->mitt == 1) {
+		printf ("Ecco i nomi delle tue stanze:\n");	
+		printf ("Stanza 1:");	
+		for(int i=0; i<8; i++){
+			printf ("%c", (char) e->stanza1[i]);
+		}
+		printf ("\n");
+		printf ("Stanza 2:");
+		for(int i=0; i<8; i++){
+			printf ("%c",(char) e->stanza2[i]);
+		}
+		printf ("\n");
+		printf ("Stanza 3:");
+		for(int i=0; i<8; i++){
+			printf ("%c",(char) e->stanza3[i]);
+		}
+		printf ("\n");
+		printf ("Stanza 4:");
+		for(int i=0; i<8; i++){
+			printf ("%c",(char) e->stanza4[i]);
+		}
+		printf ("\n");
+	}
+	return Success;
+}
+
+PacketOperations eepromPacket_ops = {
+	EEPROM_PACKET_TYPE,
+	sizeof(EepromPacket),
+	EepromPacket_initializeBuffer,
+	0,
+	EepromPacket_onReceive,
+	0
+}; 
+//fine pacchetto Eeprom
 
 
 void flushOutputBuffer(int fd) {
 	while(packet_handler.tx_size){
 		uint8_t c = PacketHandler_txByte(&packet_handler);
-		write(fd, &c, 1);
+		int res = write(fd, &c, 1);
+		if(res == 0){
+			printf("Errore in write\n");
+		}
 		usleep(1000);
+		
 	}
 }
 
 void flushInputBuffer( int fd) {
 	volatile int packet_complete =0;
+		
 		while ( !packet_complete ) 
 		{
 			uint8_t c;
@@ -176,21 +249,40 @@ void flushInputBuffer( int fd) {
 			}
 		}		
 }
-
+void memorizza(int fd){
+	EepromPacket e1 = {{EEPROM_PACKET_TYPE, EEPROM_PACKET_SIZE, 0}, 0, {0}, {0}, {0}, {0}};
+	for(int i=0; i<8; i++){
+		e1.stanza1[i]=(int) nomeStanza1[i];
+		e1.stanza2[i]=(int) nomeStanza2[i];
+		e1.stanza3[i]=(int) nomeStanza3[i];
+		e1.stanza4[i]=(int) nomeStanza4[i];
+	}
+	PacketHandler_sendPacket(&packet_handler, (PacketHeader*) &e1);	
+	flushOutputBuffer(fd);
+	usleep(50000);
+	flushInputBuffer(fd);	
+}
 
 void configura (void) {
 	printf("Inizio configurazione:\n");
 	printf("Inserisci il nome della prima stanza\n");
-	scanf("%s", nomeStanza1);
+	int c1 = scanf("%s", nomeStanza1);
 	printf("Inserisci il nome della seconda stanza\n");
-	scanf("%s", nomeStanza2);
+	int c2 = scanf("%s", nomeStanza2);
 	printf("Inserisci il nome della terza stanza\n");
-	scanf("%s", nomeStanza3);
+	int c3 = scanf("%s", nomeStanza3);
 	printf("Inserisci il nome della quarta stanza\n");
-	scanf("%s", nomeStanza4);
-	printf("Le tue stanze sono >> 1°:%s, 2°:%s, 3°:%s, 4°:%s\n", nomeStanza1, nomeStanza2, nomeStanza3, nomeStanza4);
+	int c4 = scanf("%s", nomeStanza4);
+	if( (c1 || c2 || c3 || c4) <1){
+		printf("Errore scanf\n");
+	}
+	
 }
-
+void errore(int n){
+	if(n<1){
+		printf("Errore\n");
+	}
+}
 int main(int argc, char** argv){
 	if (argc!=2){
 		return -1;
@@ -208,23 +300,37 @@ int main(int argc, char** argv){
 	PacketHandler_installPacket(&packet_handler, &ledPacket_ops);
 	PacketHandler_installPacket(&packet_handler, &tempPacket_ops);
 	PacketHandler_installPacket(&packet_handler, &DigitalStatusPacket_ops);
-	
+	PacketHandler_installPacket(&packet_handler, &eepromPacket_ops);
 	configura();
+	memorizza(fd);
 
 	while (1) {
-			printf("Cosa vuoi controllare? [luce, gradi, digital], [esc] per uscire\n");
-			scanf("%s", &cmd);
-			if (!strcmp(cmd, "gradi")){
+		printf("Cosa vuoi controllare? [luce, gradi, digital, eeprom], [esc] per uscire\n");
+			int n = scanf("%s", cmd);
+			errore(n);
+			if (!strcmp(cmd, "eeprom")){
+				printf("Vuoi cambiare configurazione? [si, no], [esc] per uscire\n");
+				n = scanf("%s", cmd);
+				errore(n);
+				if(!strcmp(cmd, "si")){
+					configura();
+					memorizza(fd);
+				}
+				else {
+					printf("Stanze correnti: [%s, %s, %s, %s]\n",nomeStanza1, nomeStanza2, nomeStanza3, nomeStanza4);
+				}		
+			}
+			else if (!strcmp(cmd, "gradi")){
 				TempPacket t={ {TEMP_PACKET_TYPE, TEMP_PACKET_SIZE, 0}, 0, 0};
 				PacketHandler_sendPacket(&packet_handler, (PacketHeader*) &t);
-				
 				flushOutputBuffer(fd);
 				usleep(50000);
 				flushInputBuffer(fd);
 			}
 			else if (!strcmp(cmd, "luce")){
 				printf("Quale stanza vuoi controllare? [%s, %s, %s, %s]\n",nomeStanza1, nomeStanza2, nomeStanza3, nomeStanza4);
-				scanf("%s", &cmd); 
+				n = scanf("%s", cmd); 
+				errore(n);
 				uint8_t stanza=0;
 				int continua = 1;
 				if (!strcmp(cmd, nomeStanza1)){
@@ -242,7 +348,8 @@ int main(int argc, char** argv){
 				}
 				if (continua) {
 					printf("Vuoi accendere o spegnere la luce in %s? [accendi/spegni]\n", cmd);
-					scanf("%s", &cmd1);
+					n = scanf("%s", cmd1);
+					errore(n);
 					uint8_t on_off;
 					int ok=0;
 					if (!strcmp(cmd1, "spegni")){
@@ -267,31 +374,41 @@ int main(int argc, char** argv){
 			}	
 			else if (!strcmp(cmd, "digital")){
 				printf("Di quale stanza vuoi sapere lo stato? [%s,%s,%s,%s]\n", nomeStanza1, nomeStanza2, nomeStanza3, nomeStanza4);
-				scanf("%s", &cmd);
-				uint8_t pinDigitale; 
+				n = scanf("%s", cmd);
+				errore(n);
+				uint8_t pinDigitale = 0; 
+				int cnt = 0;
 				if (!strcmp(cmd, nomeStanza1)){
 					pinDigitale = 13;	
+					cnt = 1;
 				} else if (!strcmp(cmd, nomeStanza2)){
 					pinDigitale = 10;
+					cnt = 1;
 				} else if (!strcmp(cmd, nomeStanza3)){
 					pinDigitale = 9;
+					cnt = 1;
 				} else if (!strcmp(cmd, nomeStanza4)){
-					pinDigitale = 6;	
+					pinDigitale = 6;
+					cnt = 1;	
 				} else {
-					return;
+					printf("Comando inserito sbagliato\n");
 				}
-				uint8_t statusPin = 0;
-				DigitalStatusPacket d0 = { {DIGITALSTATUS_PACKET_TYPE, DIGITALSTATUS_PACKET_SIZE, 0}, pinDigitale, statusPin};
-				printf("pinDigitale richiesto: %d\n", pinDigitale);
-				PacketHandler_sendPacket(&packet_handler, (PacketHeader*) &d0);
-				flushOutputBuffer(fd);
-				usleep(50000);
-				flushInputBuffer(fd);
+				if (cnt){
+					uint8_t statusPin = 0;
+					DigitalStatusPacket d0 = { {DIGITALSTATUS_PACKET_TYPE, DIGITALSTATUS_PACKET_SIZE, 0}, pinDigitale, statusPin};
+					printf("pinDigitale richiesto: %d\n", pinDigitale);
+					PacketHandler_sendPacket(&packet_handler, (PacketHeader*) &d0);
+					flushOutputBuffer(fd);
+					usleep(50000);
+					flushInputBuffer(fd);
+				}
 			}
 			else if (!strcmp(cmd, "esc")){
 				break;
 			}
-			else {
+			
+			else {	
+				
 				printf("Comando non trovato, dimmi cosa vuoi fare...\n");	
 			}
 	}		

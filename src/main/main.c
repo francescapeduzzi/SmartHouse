@@ -11,7 +11,6 @@
 #include "adc.h"
 #include <math.h>
 
-//#include "serial_linux.h"
 static struct UART* uart;
 static PacketHandler packet_handler; 
 float temperatura;
@@ -19,10 +18,21 @@ uint8_t pinDigitale;
 uint8_t statusPin;
 int controllo= 0;
 int controltemp=0;
+int controlloLed =0;
+int eeprom_control =0;
 volatile uint8_t interrupt_occurred;
 volatile int reset=1;
 int button = 21;
 int piezo = 4;
+char nomeStanza1[8]; 
+char nomeStanza2[8]; 
+char nomeStanza3[8]; 
+char nomeStanza4[8];
+int tmpStanza1[8];
+int tmpStanza2[8];
+int tmpStanza3[8];
+int tmpStanza4[8];
+
 
 ISR(INT0_vect){
 		interrupt_occurred=1;
@@ -86,13 +96,28 @@ typedef struct DigitalStatusPacket {
 } DigitalStatusPacket;
 #pragma pack(pop) 
 
-#define DIGITALSTATUS_PACKET_TYPE 2
+#define DIGITALSTATUS_PACKET_TYPE 3
 #define DIGITALSTATUS_PACKET_SIZE (sizeof(DigitalStatusPacket))
+
+#pragma pack(push,1)
+typedef struct EepromPacket {
+	PacketHeader header;
+	uint8_t mitt;	
+	uint8_t stanza1[8];
+	uint8_t stanza2[8];
+	uint8_t stanza3[8];
+	uint8_t stanza4[8];
+} EepromPacket;
+#pragma pack(pop) 
+
+#define EEPROM_PACKET_TYPE 2
+#define EEPROM_PACKET_SIZE (sizeof(EepromPacket))
 
 DigitalStatusPacket digital_buffer;
 LedPacket led_packet_buffer;
 //temperatura 
 TempPacket temp_packet_buffer;
+EepromPacket eeprom_packet_buffer;
 
 PacketHeader* LedPacket_initializeBuffer(PacketType type, PacketSize size, void* args __attribute__((unused))) {
 	if(type != LED_PACKET_TYPE || size != LED_PACKET_SIZE)
@@ -105,12 +130,16 @@ PacketHeader* TempPacket_initializeBuffer(PacketType type, PacketSize size, void
 	return (PacketHeader*) &temp_packet_buffer;
 }
 
-
-
 PacketHeader* DigitalStatusPacket_initializeBuffer(PacketType type, PacketSize size, void* args __attribute__((unused))) {
 	if(type != DIGITALSTATUS_PACKET_TYPE || size != DIGITALSTATUS_PACKET_SIZE)
 		return 0;
 	return (PacketHeader*) &digital_buffer;
+}
+
+PacketHeader* EepromPacket_initializeBuffer(PacketType type, PacketSize size, void* args __attribute__((unused))) {
+	if(type != EEPROM_PACKET_TYPE || size != EEPROM_PACKET_SIZE)
+		return 0;
+	return (PacketHeader*) &eeprom_packet_buffer;
 }
 
 void val (int pinD){
@@ -123,44 +152,52 @@ PacketStatus DigitalStatusPacket_onReceive(PacketHeader* header, void* args __at
 	DigitalStatusPacket* d = (DigitalStatusPacket*) header;	
 	val(d->pin);
 	return Success;
-
 }
 
 PacketStatus TempPacket_onReceive(PacketHeader* header, void* args __attribute__((unused))){
 	TempPacket* te= (TempPacket*) header;
 	controltemp=1;
-	}
+	return Success;
+}
 
 
 PacketStatus LedPacket_onReceive(PacketHeader* header, void* args __attribute__((unused))){
 	LedPacket* l = (LedPacket*) header;
 	int stanza = l->stanza;
 	int on_off = l->on_off;
-	if (l->on_off == 1){
+	if (on_off == 1){
 		ledOn(stanza);
+		if((DigIO_getValue(13)==1)&&(DigIO_getValue(10)==1)&&(DigIO_getValue(9)==1)&&(DigIO_getValue(6)==1)){
+			controlloLed = 1;
+		}
 	}
-	else if (l->on_off == 0){
+	else if (on_off == 0){
 		ledOff(l->stanza);
 	}
 	else {
 		printf("Error\n");
 	}
-	//set_EEPROM_stanza(stanza);
-	char s[2];
-	sprintf(s, "%d", stanza);
-	EEPROM_write(0, s, 1);
-	char c[1];
-	sprintf(c, "%d", on_off);
-	EEPROM_write(16, c, 1);
-	if (l->on_off == 1){
-		ledOn(l->stanza);
-	}
-	else if (l->on_off == 0){
-		ledOff(l->stanza);
-	}
-	else {
-		printf("Error\n");
-	}
+	
+	return Success;
+}
+
+PacketStatus EepromPacket_onReceive(PacketHeader* header, void* args __attribute__((unused))){
+	EepromPacket* e= (EepromPacket*) header;
+	uint8_t t[256]={0};
+	EEPROM_write(0, &t, 256);
+	
+	
+	for(int i=0; i<8; i++){
+		tmpStanza1[i]= e->stanza1[i];
+		tmpStanza2[i]= e->stanza2[i];
+		tmpStanza3[i]= e->stanza3[i];
+		tmpStanza4[i]= e->stanza4[i];
+		EEPROM_write((i*8), &tmpStanza1[i], sizeof(uint8_t));
+		EEPROM_write((64+(i*8)), &tmpStanza2[i], sizeof(uint8_t));
+		EEPROM_write((128+(i*8)), &tmpStanza3[i], sizeof(uint8_t));
+		EEPROM_write((192+(i*8)),&tmpStanza4[i],sizeof(uint8_t));
+	}	
+	eeprom_control = 1;
 	return Success;
 }
 
@@ -181,7 +218,12 @@ PacketOperations DigitalStatusPacket_ops = {
 	DigitalStatusPacket_onReceive,
 	0
 }; 
-
+uint8_t	leggiDaEeprom(int i, int n){
+	uint8_t eeprom_buffer[8];
+	memset(eeprom_buffer, 0, 8);
+	EEPROM_read(eeprom_buffer+i, (n + (8*i)), sizeof(uint8_t));     
+	return eeprom_buffer[i];
+}
 void temp(void) {
 	uint8_t valoretemp= adc_read();
 	
@@ -200,6 +242,21 @@ PacketOperations tempPacket_ops = {
 	0
 };
 
+PacketOperations eepromPacket_ops = {
+	EEPROM_PACKET_TYPE,
+	sizeof(EepromPacket),
+	EepromPacket_initializeBuffer,
+	0,
+	EepromPacket_onReceive,
+	0
+};
+void timerFn(void* args){
+	ledOff(10);
+	ledOff(13);
+	ledOff(9);
+	ledOff(6);	
+}
+
 int main(void){
 	DigIO_init();
 	DigIO_setDirection(button, Input); //Pin 21 input
@@ -213,6 +270,7 @@ int main(void){
 
   // trigger int0 on rising edge
   EICRA= 1<<ISC01 | 1<<ISC00;
+	Timers_init();
   sei();
 	DigIO_setDirection(piezo, Output);
 	DigIO_setValue(piezo, 0);
@@ -222,14 +280,33 @@ int main(void){
 	//temperatura
 	PacketHandler_installPacket(&packet_handler, &tempPacket_ops);
 	PacketHandler_installPacket(&packet_handler, &DigitalStatusPacket_ops);
+	PacketHandler_installPacket(&packet_handler, &eepromPacket_ops);
 	
 	interrupt_occurred=0;
+	struct Timer* timerOff = Timer_create("timer_0",1000, timerFn, NULL);
 	while(1){
 		while (! interrupt_occurred){
-			DigIO_setValue(button, 1);		
+			DigIO_setValue(button, 1);	
+				
 			flushInputBuffer();	
 			delayMs(10);
-		
+			if(controlloLed){
+				Timer_start(timerOff);
+				controlloLed=0;
+			}
+			if(eeprom_control){
+				EepromPacket e1 = {{EEPROM_PACKET_TYPE, EEPROM_PACKET_SIZE, 0}, 1, {0}, {0}, {0}, {0}};
+				for(int i=0; i<8; i++){
+					e1.stanza1[i] = leggiDaEeprom(i, 0);
+					e1.stanza2[i] = leggiDaEeprom(i, 64);
+					e1.stanza3[i] = leggiDaEeprom(i, 128);
+					e1.stanza4[i] = leggiDaEeprom(i, 192);
+				}
+				PacketHandler_sendPacket(&packet_handler, (PacketHeader*) &e1);
+				flushOutputBuffers();
+				
+				eeprom_control = 0;
+			}
 			if(controltemp){
 				temp();
 				TempPacket t={ {TEMP_PACKET_TYPE, TEMP_PACKET_SIZE, 0}, temperatura, 1};
@@ -268,6 +345,7 @@ int main(void){
 	PacketHandler_uninstallPacket(&packet_handler, LED_PACKET_TYPE);
 	PacketHandler_uninstallPacket(&packet_handler, TEMP_PACKET_TYPE);
 	PacketHandler_uninstallPacket(&packet_handler, DIGITALSTATUS_PACKET_TYPE);
+	PacketHandler_uninstallPacket(&packet_handler, EEPROM_PACKET_TYPE);
 	
 	return 0;
 }	

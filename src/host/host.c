@@ -21,7 +21,7 @@ char nomeStanza2[20];
 char nomeStanza3[20]; 
 char nomeStanza4[20]; 
 
-static struct UART* uart;
+//static struct UART* uart;
 /*------------------- LedPacket ------------*/
 
 #pragma pack(push,1)

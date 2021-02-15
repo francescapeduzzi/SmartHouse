@@ -27,6 +27,7 @@ OBJS=	pins.o\
      	digio.o\
 			packet_handler.o\
 			adc.o\
+			timer.o\
     
 HEADERS= packet_handler.h\
 	 packet_header.h\
@@ -37,6 +38,7 @@ HEADERS= packet_handler.h\
 	 pins.h\
 	 uart.h\
 	 adc.h\
+	 timer.h\
 	 
 BINS= main.elf\
 
@@ -51,7 +53,7 @@ all:	$(BINS)
 %.o:	$(PREFIX)/src/$(ARCH)/%.c 
 	$(CC) $(CC_OPTS) -c  $<
 
-#orazio server objects
+#server objects
 %.o:	$(PREFIX)/src/main/%.c 
 	$(CC) $(CC_OPTS) -c  $<
 

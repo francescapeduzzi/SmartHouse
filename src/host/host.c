@@ -180,7 +180,6 @@ PacketHeader* EepromPacket_initializeBuffer(PacketType type, PacketSize size, vo
 
 PacketStatus EepromPacket_onReceive(PacketHeader* header, void* args __attribute__((unused))){
 	EepromPacket* e= (EepromPacket*) header;
-	if (e->mitt == 1) {
 		printf ("Ecco i nomi delle tue stanze:\n");	
 		printf ("Stanza 1:");	
 		for(int i=0; i<8; i++){
@@ -202,7 +201,6 @@ PacketStatus EepromPacket_onReceive(PacketHeader* header, void* args __attribute
 			printf ("%c",(char) e->stanza4[i]);
 		}
 		printf ("\n");
-	}
 	return Success;
 }
 
@@ -250,7 +248,7 @@ void flushInputBuffer( int fd) {
 		}		
 }
 void memorizza(int fd){
-	EepromPacket e1 = {{EEPROM_PACKET_TYPE, EEPROM_PACKET_SIZE, 0}, 0, {0}, {0}, {0}, {0}};
+	EepromPacket e1 = {{EEPROM_PACKET_TYPE, EEPROM_PACKET_SIZE, 0}, 1, {0}, {0}, {0}, {0}};
 	for(int i=0; i<8; i++){
 		e1.stanza1[i]=(int) nomeStanza1[i];
 		e1.stanza2[i]=(int) nomeStanza2[i];
@@ -259,12 +257,8 @@ void memorizza(int fd){
 	}
 	PacketHandler_sendPacket(&packet_handler, (PacketHeader*) &e1);	
 	flushOutputBuffer(fd);
-	usleep(50000);
-	flushInputBuffer(fd);	
 }
-
-void configura (void) {
-	printf("Inizio configurazione:\n");
+void inizio(void){
 	printf("Inserisci il nome della prima stanza\n");
 	int c1 = scanf("%s", nomeStanza1);
 	printf("Inserisci il nome della seconda stanza\n");
@@ -276,7 +270,23 @@ void configura (void) {
 	if( (c1 || c2 || c3 || c4) <1){
 		printf("Errore scanf\n");
 	}
-	
+}
+void configura (int fd) {
+	printf("Inizio configurazione:\n");
+	printf("Vuoi visualizzare la configurazione precedente? [si, no]\n");
+	int n = scanf("%s", cmd);
+	errore(n);
+	if (!strcmp(cmd, "si")){
+		EepromPacket e1 = {{EEPROM_PACKET_TYPE, EEPROM_PACKET_SIZE, 0}, 0, {0}, {0}, {0}, {0}};
+		PacketHandler_sendPacket(&packet_handler, (PacketHeader*) &e1);	
+		flushOutputBuffer(fd);
+		usleep(50000);
+		flushInputBuffer(fd);
+	}
+	else {
+		inizio();
+		memorizza(fd);
+	}
 }
 void errore(int n){
 	if(n<1){
@@ -301,8 +311,7 @@ int main(int argc, char** argv){
 	PacketHandler_installPacket(&packet_handler, &tempPacket_ops);
 	PacketHandler_installPacket(&packet_handler, &DigitalStatusPacket_ops);
 	PacketHandler_installPacket(&packet_handler, &eepromPacket_ops);
-	configura();
-	memorizza(fd);
+	configura(fd);
 
 	while (1) {
 		printf("Cosa vuoi controllare? [luce, gradi, digital, eeprom], [esc] per uscire\n");
@@ -313,11 +322,15 @@ int main(int argc, char** argv){
 				n = scanf("%s", cmd);
 				errore(n);
 				if(!strcmp(cmd, "si")){
-					configura();
+					inizio();
 					memorizza(fd);
 				}
 				else {
-					printf("Stanze correnti: [%s, %s, %s, %s]\n",nomeStanza1, nomeStanza2, nomeStanza3, nomeStanza4);
+					EepromPacket e1 = {{EEPROM_PACKET_TYPE, EEPROM_PACKET_SIZE, 0}, 0, {0}, {0}, {0}, {0}};
+					PacketHandler_sendPacket(&packet_handler, (PacketHeader*) &e1);	
+					flushOutputBuffer(fd);
+					usleep(50000);
+					flushInputBuffer(fd);
 				}		
 			}
 			else if (!strcmp(cmd, "gradi")){

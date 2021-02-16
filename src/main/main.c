@@ -183,21 +183,21 @@ PacketStatus LedPacket_onReceive(PacketHeader* header, void* args __attribute__(
 
 PacketStatus EepromPacket_onReceive(PacketHeader* header, void* args __attribute__((unused))){
 	EepromPacket* e= (EepromPacket*) header;
-	uint8_t t[256]={0};
-	EEPROM_write(0, &t, 256);
-	
-	
-	for(int i=0; i<8; i++){
-		tmpStanza1[i]= e->stanza1[i];
-		tmpStanza2[i]= e->stanza2[i];
-		tmpStanza3[i]= e->stanza3[i];
-		tmpStanza4[i]= e->stanza4[i];
-		EEPROM_write((i*8), &tmpStanza1[i], sizeof(uint8_t));
-		EEPROM_write((64+(i*8)), &tmpStanza2[i], sizeof(uint8_t));
-		EEPROM_write((128+(i*8)), &tmpStanza3[i], sizeof(uint8_t));
-		EEPROM_write((192+(i*8)),&tmpStanza4[i],sizeof(uint8_t));
+	if(e->mitt== 1){	
+		for(int i=0; i<8; i++){
+			tmpStanza1[i]= e->stanza1[i];
+			tmpStanza2[i]= e->stanza2[i];
+			tmpStanza3[i]= e->stanza3[i];
+			tmpStanza4[i]= e->stanza4[i];
+			EEPROM_write((i*8), &tmpStanza1[i], sizeof(uint8_t));
+			EEPROM_write((64+(i*8)), &tmpStanza2[i], sizeof(uint8_t));
+			EEPROM_write((128+(i*8)), &tmpStanza3[i], sizeof(uint8_t));
+			EEPROM_write((192+(i*8)),&tmpStanza4[i],sizeof(uint8_t));
+		}
 	}	
-	eeprom_control = 1;
+	else {
+		eeprom_control = 1;
+	}	
 	return Success;
 }
 
